@@ -1,15 +1,19 @@
 import json
 import uuid
+import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
-from config import BOT_TOKEN
+from config import BOT_TOKEN, QRIS_API_KEY, QRIS_API_SECRET, QRIS_CREATE_URL
 
 ORDER_FILE = "orders.json"
+PRICE = 10000
 
-# ===== UTIL ORDER =====
 def load_orders():
-    with open(ORDER_FILE, "r") as f:
-        return json.load(f)
+    try:
+        with open(ORDER_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return {}
 
 def save_orders(data):
     with open(ORDER_FILE, "w") as f:
@@ -27,15 +31,21 @@ def create_order(user_id):
     save_orders(orders)
     return order_id
 
-# ===== HANDLER =====
+def create_qris(order_id):
+    payload = {
+        "api_key": QRIS_API_KEY,
+        "api_secret": QRIS_API_SECRET,
+        "amount": PRICE,
+        "note": f"order_{order_id}"
+    }
+
+    r = requests.post(QRIS_CREATE_URL, json=payload)
+    return r.json()
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("🛒 Beli Akses", callback_data="buy")]
-    ]
+    keyboard = [[InlineKeyboardButton("🛒 Beli Akses", callback_data="buy")]]
     await update.message.reply_text(
-        "👋 Selamat datang\n\n"
-        "Bot ini menjual akses grup private.\n"
-        "Klik tombol di bawah untuk membeli.",
+        "👋 Selamat datang\n\nKlik tombol di bawah untuk beli akses grup.",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
@@ -45,24 +55,27 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if query.data == "buy":
         order_id = create_order(query.from_user.id)
+        qris = create_qris(order_id)
 
-        await query.edit_message_text(
-            "🧾 ORDER DIBUAT\n\n"
-            f"Order ID:\n{order_id}\n\n"
-            "💰 Harga: Rp10.000\n\n"
-            "Silakan lanjut ke pembayaran.\n"
-            "(QRIS akan ditambahkan di step berikutnya)"
+        qr_image = qris["data"]["qr_image"]
+
+        await query.message.reply_photo(
+            photo=qr_image,
+            caption=(
+                "🧾 ORDER DIBUAT\n\n"
+                f"Order ID:\n{order_id}\n\n"
+                f"💰 Harga: Rp{PRICE}\n\n"
+                "Silakan scan QRIS untuk membayar."
+            )
         )
 
-# ===== MAIN =====
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button))
-
     print("Bot berjalan...")
     app.run_polling()
 
 if __name__ == "__main__":
     main()
+
